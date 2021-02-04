@@ -1,0 +1,15 @@
+version: "3"
+
+services:
+  server:
+    build: tcp-server/
+    command: python ./setup_tcp_server.py
+    ports:
+        - 65431:65431
+
+  spark-streaming-etl:
+    build: spark-streaming-etl/
+    command: spark-submit ./analyze_tweets.py
+    network_mode: host
+    depends_on:
+      - server
