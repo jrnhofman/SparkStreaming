@@ -1,15 +1,57 @@
 version: "3"
 
 services:
-  server:
-    build: tcp-server/
-    command: python ./setup_tcp_server.py
+  # Kafka(-related) setup
+  zookeeper:
+    image: confluentinc/cp-zookeeper:5.5.1
+    container_name: zookeeper
     ports:
-        - 65431:65431
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
 
-  spark-streaming-etl:
-    build: spark-streaming-etl/
-    command: spark-submit ./analyze_tweets.py
-    network_mode: host
+  kafka-broker:
+    image: confluentinc/cp-server:5.5.1
+    container_name: kafka-broker
     depends_on:
-      - server
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: kafka-broker
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka-broker:29092
+      CONFLUENT_METRICS_REPORTER_ZOOKEEPER_CONNECT: zookeeper:2181
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: "true"
+      CONFLUENT_SUPPORT_CUSTOMER_ID: "anonymous"
+
+  tweet-reader:
+    build: tweet-reader/
+    container_name: tweet_reader
+    command: python ./tweet_producer.py
+    depends_on:
+      - zookeeper
+      - kafka-broker
+    network_mode: "host"
+
+  # The spark streaming, consuming from Kafka
+  # and outputting to PostGreSql
+  # spark-streaming-etl:
+  #   build: spark-streaming-etl/
+  #   command: spark-submit ./analyze_tweets.py
+  #   network_mode: host
+  #   depends_on:
+  #     - server
