@@ -48,6 +48,13 @@ WORKDIR $SPARK_HOME
 # Copy files
 COPY log4j.properties $SPARK_HOME/conf
 COPY analyze_tweets.py $SPARK_HOME/analyze_tweets.py
+COPY test_tweet_consumer.py $SPARK_HOME/test_tweet_consumer.py
+
+ADD test_tweet_consumer.py /
+
+RUN pip install tweepy kafka-python
+RUN apt-get update
+RUN apt-get install -y vim
 
 # Run commands
 CMD ["bin/spark-class", "org.apache.spark.deploy.master.Master", "org.apache.spark.deploy.worker.Worker"]

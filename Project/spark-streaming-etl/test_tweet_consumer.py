@@ -5,7 +5,7 @@ topic_name = 'TWEETS'
 
 consumer = KafkaConsumer(
     topic_name,
-     bootstrap_servers=['localhost:9092'],
+     bootstrap_servers=['broker:9092'],
      auto_offset_reset='latest',
      enable_auto_commit=True,
      auto_commit_interval_ms =  5000,

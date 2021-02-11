@@ -9,9 +9,7 @@ RUN pip install tweepy kafka-python
 RUN apt-get update
 RUN apt-get install -y vim
 
-ADD tweet_producer.py /server/
-ADD get_authentication.py /server/
+ADD tweet_producer.py /
+ADD get_authentication.py /
 # Credentials
-ADD twitter.txt /server/
-
-WORKDIR /server/
+ADD twitter.txt /
