@@ -20,8 +20,9 @@ producer = KafkaProducer(
 print("Producer created")
 
 class Listener(StreamListener):
-    def on_data(self, raw_data):
-        producer.send(topic_name, str.encode(raw_data))
+    def on_status(self, raw_data):
+        print(raw_data.text)
+        producer.send(topic_name, str.encode(raw_data.text))
         return True
 
 def get_tweets():

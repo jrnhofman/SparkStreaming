@@ -1,27 +1,53 @@
 from pyspark import SparkConf,SparkContext
 from pyspark.streaming import StreamingContext
-from pyspark.sql import Row,SQLContext
-import sys
-import requests
-# create spark configuration
-conf = SparkConf()
-conf.setAppName("TwitterStreamApp")
-# create spark context with the above configuration
-sc = SparkContext(conf=conf)
-sc.setLogLevel("ERROR")
-# create the Streaming Context from the above spark context with interval size 2 seconds
-ssc = StreamingContext(sc, 2)
-# setting a checkpoint to allow RDD recovery
-ssc.checkpoint("checkpoint_TwitterApp")
-# read data from port 9009
-dataStream = ssc.socketTextStream("localhost",65431)
+from pyspark.sql import Row,SQLContext, SparkSession
 
-# split each tweet into words
-words = dataStream.flatMap(lambda line: line.split(" "))
-# filter the words to get only hashtags, then map each hashtag to be a pair of (hashtag,1)
-hashtags = words.filter(lambda w: '#' in w).map(lambda x: (x, 1))
+from pyspark.sql.functions import explode
+from pyspark.sql.functions import split
+from pyspark.sql.functions import lower, col, regexp_replace
 
-hashtags.pprint()
+spark = SparkSession \
+    .builder \
+    .appName("TweetAndStockApp") \
+    .getOrCreate()
 
-ssc.start()
-ssc.awaitTermination()
+# Get stock tickers
+ticker_df = spark \
+    .read \
+    .load("NASDAQ_tickers.csv",
+        format="csv", inferSchema="true", header="true")
+
+ticker_df = ticker_df.select(lower(col('Symbol')).alias('Symbol'))
+ticker_df.show()
+
+# Get tweet stream from kafka
+df = spark \
+  .readStream \
+  .format("kafka") \
+  .option("kafka.bootstrap.servers", "broker:9092") \
+  .option("subscribe", "TWEETS") \
+  .option("startingOffsets", "earliest") \
+  .load()
+
+# Split the lines into words
+words = df.select(
+   explode(
+       split(df.value, " ")
+   ).alias("word")
+)
+
+hashtags = words.filter(words.word.contains("#"))
+hashtags = hashtags.select(lower(col('word')).alias('Symbol'))
+hashtags = hashtags.select(regexp_replace(col('Symbol'), '#', '').alias('Symbol'))
+
+hashtagFiltered = hashtags.join(ticker_df, "Symbol")
+
+hashtagCounts = hashtagFiltered.groupby("Symbol").count()
+
+query = hashtagCounts \
+    .writeStream \
+    .outputMode("complete") \
+    .format("console") \
+    .start()
+
+query.awaitTermination()

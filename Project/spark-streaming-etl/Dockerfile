@@ -49,6 +49,7 @@ WORKDIR $SPARK_HOME
 COPY log4j.properties $SPARK_HOME/conf
 COPY analyze_tweets.py $SPARK_HOME/analyze_tweets.py
 COPY test_tweet_consumer.py $SPARK_HOME/test_tweet_consumer.py
+COPY NASDAQ_tickers.csv $SPARK_HOME/NASDAQ_tickers.csv
 
 ADD test_tweet_consumer.py /
 
