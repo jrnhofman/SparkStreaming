@@ -29,7 +29,7 @@ def get_tweets():
     while True:
         listener = Listener()
         stream = Stream(auth, listener)
-        stream.filter(track=["#"], stall_warnings=True, languages=['en'])
+        stream.filter(track=["#"], stall_warnings=True)
 
 if __name__ == "__main__":
     get_tweets()
