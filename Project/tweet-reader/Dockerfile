@@ -5,7 +5,7 @@ FROM python:latest
 LABEL maintainer="jrn.hofman@gmail.com"
 LABEL description="Basic Kafka producer reading tweets and writing to Kafka topic."
 
-RUN pip install tweepy kafka-python
+RUN pip install tweepy kafka-python pandas
 RUN apt-get update
 RUN apt-get install -y vim
 

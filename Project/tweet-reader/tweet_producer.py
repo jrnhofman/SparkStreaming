@@ -1,4 +1,5 @@
 import json
+import pandas as pd
 
 from tweepy.streaming import StreamListener
 from tweepy import OAuthHandler
@@ -19,17 +20,25 @@ producer = KafkaProducer(
         bootstrap_servers=['broker:9092'])
 print("Producer created")
 
+def get_ticker_list():
+    df = pd.DataFrame(columns=['Symbol'], data=['AAPL', 'MSFT', 'AMZN', 'FB', 'GOOG', 'NVDA', 'ADBE'])
+    #df = pd.read_csv("NASDAQ_tickers.csv").iloc[:10]
+
+    return ['#'+x for x in df.Symbol.values.tolist()]
+
 class Listener(StreamListener):
     def on_status(self, raw_data):
         print(raw_data.text)
         producer.send(topic_name, str.encode(raw_data.text))
         return True
 
-def get_tweets():
+def get_tweets(lst):
+    print(lst)
     while True:
         listener = Listener()
         stream = Stream(auth, listener)
-        stream.filter(track=["#"], stall_warnings=True)
+        stream.filter(track=lst, stall_warnings=True)
 
 if __name__ == "__main__":
-    get_tweets()
+    lst = get_ticker_list()
+    get_tweets(lst)

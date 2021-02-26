@@ -1,7 +1,7 @@
 import json
 import pandas as pd
 import datetime
-from time import sleep
+import time
 from tzlocal import get_localzone
 
 from kafka import KafkaProducer
@@ -9,6 +9,8 @@ from yahoo_fin import stock_info as si
 
 
 topic_name = 'STOCK_QUOTES'
+
+starttime = time.time()
 
 producer = KafkaProducer(
         bootstrap_servers=['broker:9092'])
@@ -35,7 +37,7 @@ def get_stock_quotes():
         send_to_kafka(tickers)
 
         tickers['Price'] = None
-        sleep(10)
+        time.sleep(60.0 - ((time.time() - starttime) % 60.0))
 
 if __name__ == "__main__":
     get_stock_quotes()
