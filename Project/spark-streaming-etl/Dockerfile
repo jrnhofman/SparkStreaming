@@ -7,7 +7,7 @@ LABEL description="Basic Spark Streaming client that reads from the server provi
 
 # Update the system.
 RUN apt-get update \
- && apt-get install -qq -y curl vim net-tools \
+ && apt-get install -qq -y curl vim net-tools iputils-ping \
  && rm -rf /var/lib/apt/lists/*
 
 # Install Python

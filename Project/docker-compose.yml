@@ -71,6 +71,8 @@ services:
       - broker
     networks:
       - app_network
+    ports:
+      - 5001:5001
     entrypoint:
       - bash
       - -c
@@ -79,3 +81,22 @@ services:
         sleep 0
         # Run the client code
         spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.0.2 ./analyze_tweets.py
+
+
+  # dashboard:
+  #   build: dashboard/
+  #   container_name: dashboard
+  #   depends_on:
+  #     - tweet_consumer
+  #   networks:
+  #     - app_network
+  #   ports:
+  #     - 9001:9001
+  #   entrypoint:
+  #     - bash
+  #     - -c
+  #     - |
+  #       echo 'Giving Kafka a bit of time to start up…'
+  #       sleep 0
+  #       # Run the client code
+  #       python ./dashboard.py

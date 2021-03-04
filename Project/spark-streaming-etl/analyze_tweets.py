@@ -1,110 +1,76 @@
-from pyspark import SparkConf,SparkContext
-from pyspark.streaming import StreamingContext
-from pyspark.sql import Row,SQLContext, SparkSession
+from pyspark.sql import Row, SparkSession
 
 from pyspark.sql.functions import explode, unix_timestamp
-from pyspark.sql.functions import split, expr, lit, date_trunc
-from pyspark.sql.functions import lower, col, regexp_replace, window
+from pyspark.sql.functions import split, expr, lit
+from pyspark.sql.functions import lower, col, regexp_replace
+from pyspark.sql.functions import window, concat_ws
+
+from pyspark.sql.types import StringType, IntegerType, DoubleType, TimestampType
+
+import requests
 
 spark = SparkSession \
     .builder \
     .appName("TweetAndStockApp") \
     .getOrCreate()
 
-# Get stock_tickers
+# Reading stock quotes provided every minute
+# from Kafka topic
 ticker_df = spark \
-  .readStream \
-  .format("kafka") \
-  .option("kafka.bootstrap.servers", "broker:9092") \
-  .option("subscribe", "STOCK_QUOTES") \
-  .option("startingOffsets", "earliest") \
-  .load()
+    .readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "broker:9092") \
+    .option("subscribe", "STOCK_QUOTES") \
+    .load()
 
-tickers = (ticker_df
-    .withWatermark("timestamp", "120 seconds")
-    .select(
-        col("timestamp")
-        , split(col("value"), " ").getItem(0).alias("Symbol")
-        , split(col("value"), " ").getItem(1).alias("Price")
-    )
-    .select(
-        #date_trunc('minute', col("timestamp")).alias("ticker_ts")
-        col("timestamp").alias("ticker_ts")
-        , lower(col("Symbol")).alias("ticker_symbol")
-        , col("Price").alias("price")
-    )
-    # Temporary since I changed the schema of the kafka data
-    .filter(col("ticker_ts") > unix_timestamp(lit('2021-02-26 10:30:00')).cast('timestamp'))
+tickers = (
+    ticker_df
+        .withWatermark("timestamp", "120 seconds")
+        .select(
+            col("timestamp")
+            , split(col("value"), " ").getItem(0).alias("Symbol")
+            , split(col("value"), " ").getItem(1).alias("Price")
+        )
+        .select(
+            col("timestamp").alias("ticker_ts")
+            , lower(col("Symbol")).alias("ticker_symbol")
+            , col("Price").alias("price")
+        )
 )
 
-# tickers_with_window = (tickers
-#     .groupBy(
-#         window(col("ticker_ts"), "30 minutes", "30 minutes").alias("ticker_window"),
-#         col("ticker_symbol")
-#     )
-#     .agg({'price' : 'avg'})
-#     .select(
-#         col('ticker_window').start.alias('ticker_ts')
-#         , col('ticker_window')
-#         , col('ticker_symbol')
-#         , col('avg(price)').alias('price'))
-# )
+# Reading tweets pre-filtered on hashtags
+# from Kafka topic
+df = (spark
+    .readStream
+    .format("kafka")
+    .option("kafka.bootstrap.servers", "broker:9092")
+    .option("subscribe", "TWEETS")
+    .load()
+)
 
-# Get tweet stream from kafka
-df = spark \
-  .readStream \
-  .format("kafka") \
-  .option("kafka.bootstrap.servers", "broker:9092") \
-  .option("subscribe", "TWEETS") \
-  .option("startingOffsets", "earliest") \
-  .load()
-
-# Split the lines into words
 hashtags = (df
     .withWatermark("timestamp", "120 seconds")
+    .selectExpr("timestamp", "CAST(value as string) as value")
     .select(
         col("timestamp")
-        , explode(split(col("value"), " ")
-        ).alias("word")
+        , col("value").alias("tweet")
+        # splitting to extract the hashtags
+        , explode(split(col("value"), " ")).alias("word")
     )
     .filter(col("word").contains("#"))
-    .select(col('timestamp'), lower(col('word')).alias('Symbol'))
+    .select(col('timestamp'), col("tweet"), lower(col('word')).alias('Symbol'))
     .select(
         col('timestamp').alias('ht_ts')
+        , col("tweet")
         , regexp_replace(col('Symbol'), '#', '').alias('ht_symbol')
         , lit(1).alias('cnt')
     )
 )
 
-# hastag_counts = hashtags.groupBy(
-#     window(col("ht_ts"), "30 minutes", "30 minutes").alias("ht_window"),
-#     col("ht_symbol")
-# ).count()
-
-# # tickers = (ticker_df
-# #     .withWatermark("timestamp", "14 days")
-# #     .select(
-# #         col("timestamp").alias('ticker_ts')
-# #         , col("value")
-# #     ))
-# tickers = (ticker_df
-#     .withWatermark("timestamp", "14 days")
-#     .groupBy(
-#         window(col("timestamp"), "30 minutes", "30 minutes").alias("ticker_window"),
-#         col("Symbol").alias("ticker_symbol")
-#     )
-# ).avg()
-
-# query = hashtags \
-#     .writeStream \
-#     .outputMode("append") \
-#     .format("console") \
-#     .option("truncate", "false") \
-#     .start()
-
-# query.awaitTermination()
-
-
+# Joining stock quotes and hashtags
+# On the stock symbols (or aliases, i.e. GOOG and Google)
+# This is a left join since no tweets can be produced
+# within a minute of stock quote
 joined = tickers.join(
     hashtags,
     expr("""
@@ -116,24 +82,102 @@ joined = tickers.join(
     "leftOuter"
 )
 
-### Doesn't work yet because of
-# WARN UnsupportedOperationChecker: Detected pattern of possible 'correctness' issue due to global watermark. The query contains stateful operation which can emit rows older than the current watermark plus allowed late record delay, which are "late rows" in downstream stateful operations and these rows can be discarded. Please refer the programming guide doc for more details
-result = (joined
-    .groupBy(
-        window(col("ticker_ts"), "1 minutes", "1 minutes").alias("ticker_window"),
-        col("ticker_symbol")
+# Since we want to aggregate tweet counts and stock prices
+# over a window, this is not possible to do properly after
+# a join, an (ugly) solution is to create a kafka topic
+# with the joined data and then read it again for the agg
+# which is what we do here
+(joined
+    .fillna({ 'cnt': 0, 'tweet': ''})
+    .withColumn(
+        "value"
+        , concat_ws(
+            ','
+            , col("ticker_ts")
+            , col("ticker_symbol")
+            , col("price")
+            , col("cnt")
+            , col("tweet")
+            , col("ht_ts")
+        )
     )
-    .agg({'price' : 'avg', 'cnt' : 'sum'})
+    .writeStream
+    .format("kafka")
+    .option("kafka.bootstrap.servers", "broker:9092")
+    .option("topic", "JOINED_TWEETS")
+    .option("checkpointLocation", "checkpoints")
+    .start())
+
+# Read the topic we just wrote back
+joined_df = (spark
+    .readStream
+    .format("kafka")
+    .option("kafka.bootstrap.servers", "broker:9092")
+    .option("startingOffsets", "earliest")
+    .option("subscribe", "JOINED_TWEETS")
+    .load()
+)
+
+result = (joined_df
+    # decoding and splitting back to columns
+    .selectExpr("CAST(value as string) as value")
+    .select(
+        split(col("value"), ",").getItem(0).alias("ticker_ts"),
+        split(col("value"), ",").getItem(1).alias("ticker_symbol"),
+        split(col("value"), ",").getItem(2).alias("price"),
+        split(col("value"), ",").getItem(3).alias("cnt"),
+        split(col("value"), ",").getItem(4).alias("tweet"),
+        split(col("value"), ",").getItem(5).alias("ht_ts"),
+    )
+    # casting
+    .select(
+        col("ticker_ts").cast("timestamp")
+        , col("ticker_symbol")
+        , col("ht_ts").cast("timestamp")
+        , col("price").cast(DoubleType())
+        , col("cnt").cast(IntegerType())
+        , col(("tweet"))
+    )
+    .filter(col("ticker_ts") > unix_timestamp(lit('2021-03-04 15:00:00')).cast('timestamp'))
+    .withWatermark("ticker_ts", "10 minutes")
+    # grouping data in 5 minute windows
+    .groupBy(
+        window(col("ticker_ts"), "5 minutes", "5 minutes").alias("ticker_window")
+        ,col("ticker_symbol")
+    )
+    .agg({'price': 'avg', 'cnt': 'sum', 'tweet': 'collect_list'})
+    # final result
     .select(
         col('ticker_window').start.alias('ticker_ts')
         , col('ticker_window')
         , col('ticker_symbol')
         , col('avg(price)').alias('price')
         , col('sum(cnt)').alias('n_tweets')
+        , col('collect_list(tweet)').alias('tweets')
     )
 )
 
-query = joined \
+def send_df_to_dashboard(df, epoch_id):
+    if df.count() > 0:
+        request_data = {}
+        print("COLUMNS")
+        print(df.columns)
+        for c in df.columns:
+            print("COL: ", c)
+            print("DATA")
+            print(df.select(c).collect())
+            request_data[c] = [t[c] for t in df.filter("ticker_symbol='goog'").select(c).collect()]
+
+        print(request_data)
+
+        url = 'http://dashboard:5001/updateData'
+        response = requests.post(url, data=request_data)
+
+# Write result to endpoint to be picked up by dashboard
+result.writeStream.foreachBatch(send_df_to_dashboard).start()
+
+# write result to console
+query = result \
     .writeStream \
     .outputMode("append") \
     .format("console") \
