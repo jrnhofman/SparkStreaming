@@ -53,7 +53,7 @@ COPY NASDAQ_tickers.csv $SPARK_HOME/NASDAQ_tickers.csv
 
 ADD test_tweet_consumer.py /
 
-RUN pip install tweepy kafka-python
+RUN pip install tweepy kafka-python pandas
 RUN apt-get update
 RUN apt-get install -y vim
 

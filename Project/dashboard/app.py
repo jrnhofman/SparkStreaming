@@ -1,63 +1,76 @@
-from flask import Flask, Markup, render_template, jsonify
-#from flask import Flask,jsonify,request
-#from flask import render_template
-#import ast
+from flask import Flask, Markup, render_template, jsonify, request
+import requests
+import ast
+import pandas as pd
+
 app = Flask(__name__)
-#labels = []
-#values = []
 
-labels = [
-    '2020-03-03 13:05:00'
-    , '2020-03-03 13:10:00'
-    , '2020-03-03 13:15:00'
-    , '2020-03-03 13:20:00'
-    , '2020-03-03 13:25:00'
-    , '2020-03-03 13:30:00'
-    , '2020-03-03 13:35:00'
-    , '2020-03-03 13:40:00'
-    , '2020-03-03 13:45:00'
-    , '2020-03-03 13:50:00'
-    , '2020-03-03 13:55:00'
-    , '2020-03-03 14:00:00'
-]
-
-values = [
-    967.67, 1190.89, 1079.75, 1349.19,
-    2328.91, 2504.28, 2873.83, 4764.87,
-    4349.29, 6458.30, 9907, 16297
-]
+info_pd = pd.DataFrame(columns=['tickers','timestamps','stock_prices','tweet_counts'])
+timestamps = []
+stock_prices = []
+tweet_counts = []
+tickers = []
 
 @app.route('/')
 def line():
-    global labels,values
-    #labels = []
-    #values = []
-    return render_template('line_chart.html', title='Google stock price over time', max=17000, labels=labels, values=values)
+    global info_pd
+    global timestamps, stock_prices, tweet_counts, tickers
+    return render_template('chart_new.html', title='Stocks and tweets over time', labels=timestamps, values=stock_prices)
 
 @app.route('/refreshData')
 def refresh_graph_data():
-    global labels, values
-    print("labels now: " + str(labels))
-    print("data now: " + str(values))
-    from random import randint
-    values = [randint(0,17000)]*len(values)
-    print(values)
-    return jsonify(sLabel=labels, sData=values)
+    global info_pd
+    global timestamps, stock_prices, tweet_counts, tickers
+    print("timestamps: " + str(timestamps))
+    print("stock_prices: " + str(stock_prices))
+    print("tweet_counts: " + str(tweet_counts))
+    print("tickers: " + str(tickers))
+    return jsonify(sLabel=timestamps, sData=stock_prices, sTickers=tickers, sTweetCounts=tweet_counts)
 
-# Todo - figure out why auto-updating the chart doesn't work
-# maybe the order of the script? check with Hanee's work
-# maybe the chart library?
+@app.route('/updateData', methods=['POST'])
+def update_data():
+    global info_pd
+    global timestamps, stock_prices, tweet_counts, tickers
+    if not request.form or 'ticker_ts_str' not in request.form:
+        return "error",400
 
-#@app.route('/updateData', methods=['POST'])
-#def update_data():
-#	global labels, values
-#	if not request.form or 'data' not in request.form:
-#    	return "error",400
-#	labels = ast.literal_eval(request.form['label'])
-#	values = ast.literal_eval(request.form['data'])
-#	print("labels received: " + str(labels))
-#	print("data received: " + str(values))
-#	return "success",201
+    tickers_inc = ast.literal_eval(request.form['tickers'])
+    timestamps_inc = ast.literal_eval(request.form['ticker_ts_str'])
+    stock_prices_inc = ast.literal_eval(request.form['price'])
+    tweet_counts_inc = ast.literal_eval(request.form['n_tweets'])
+    print("tickers received: " + str(tickers_inc))
+    print("timestamps received: " + str(timestamps_inc))
+    print("stock prices received: " + str(stock_prices_inc))
+    print("tweet counts received: " + str(tweet_counts_inc))
+
+    for i,t in enumerate(tickers_inc):
+        for j,ts in enumerate(timestamps_inc[i]):
+            tmp_pd = pd.DataFrame(
+                columns=['tickers','timestamps','stock_prices','tweet_counts']
+                , data=[[t, ts, stock_prices_inc[i][j], tweet_counts_inc[i][j]]])
+            info_pd = info_pd.append(tmp_pd, ignore_index=True)
+
+    info_pd = info_pd.drop_duplicates()
+    print(info_pd)
+
+
+    tweet_counts = []
+    stock_prices = []
+    tickers = sorted(info_pd.tickers.unique())
+    timestamps = sorted(info_pd.timestamps.unique())
+    for i, t in enumerate(tickers):
+        tweet_counts.append([])
+        stock_prices.append([])
+        for j, ts in enumerate(timestamps):
+            try:
+                tweet_counts[i].append(info_pd[(info_pd.tickers==t) & (info_pd.timestamps==ts)]['tweet_counts'].iloc[0])
+                stock_prices[i].append(info_pd[(info_pd.tickers==t) & (info_pd.timestamps==ts)]['stock_prices'].iloc[0])
+            except IndexError:
+                tweet_counts[i].append(0)
+                stock_prices[i].append(0)
+
+    return "success",201
 
 if __name__ == "__main__":
-	app.run(host='0.0.0.0', debug=True, port=9009)
+    app.run(host='0.0.0.0', debug=True, port=9009)
+

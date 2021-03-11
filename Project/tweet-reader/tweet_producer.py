@@ -21,7 +21,7 @@ producer = KafkaProducer(
 print("Producer created")
 
 def get_ticker_list():
-    df = pd.DataFrame(columns=['Symbol'], data=['AAPL', 'MSFT', 'AMZN', 'FB', 'GOOG', 'NVDA', 'ADBE'])
+    df = pd.DataFrame(columns=['Symbol'], data=['AAPL', 'apple', 'MSFT', 'microsoft', 'AMZN', 'amazon', 'FB', 'facebook', 'GOOG', 'google', 'NVDA', 'nvidia', 'ADBE', 'adobe'])
     #df = pd.read_csv("NASDAQ_tickers.csv").iloc[:10]
 
     return ['#'+x for x in df.Symbol.values.tolist()]

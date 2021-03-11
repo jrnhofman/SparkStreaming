@@ -4,6 +4,7 @@ from pyspark.sql.functions import explode, unix_timestamp
 from pyspark.sql.functions import split, expr, lit
 from pyspark.sql.functions import lower, col, regexp_replace
 from pyspark.sql.functions import window, concat_ws
+from pyspark.sql.functions import map_values, udf
 
 from pyspark.sql.types import StringType, IntegerType, DoubleType, TimestampType
 
@@ -48,6 +49,20 @@ df = (spark
     .load()
 )
 
+def map_hashtags_to_tickers(x):
+    mapper = {
+        'google' : 'goog'
+        , 'microsoft' : 'msft'
+        , 'nvidia' : 'nvda'
+        , 'facebook' : 'fb'
+        , 'adobe' : 'adbe'
+        , 'amazon' : 'amzn'
+        , 'apple' : 'aapl'
+    }
+    return mapper[x] if x in mapper.keys() else x
+
+map_hashtags_to_tickers_udf = udf(map_hashtags_to_tickers)
+
 hashtags = (df
     .withWatermark("timestamp", "120 seconds")
     .selectExpr("timestamp", "CAST(value as string) as value")
@@ -64,6 +79,12 @@ hashtags = (df
         , col("tweet")
         , regexp_replace(col('Symbol'), '#', '').alias('ht_symbol')
         , lit(1).alias('cnt')
+    )
+    .select(
+        col('ht_ts')
+        , col('tweet')
+        , map_hashtags_to_tickers_udf(col('ht_symbol')).alias('ht_symbol')
+        , col('cnt')
     )
 )
 
@@ -159,19 +180,21 @@ result = (joined_df
 
 def send_df_to_dashboard(df, epoch_id):
     if df.count() > 0:
-        request_data = {}
-        print("COLUMNS")
-        print(df.columns)
-        for c in df.columns:
-            print("COL: ", c)
-            print("DATA")
-            print(df.select(c).collect())
-            request_data[c] = [t[c] for t in df.filter("ticker_symbol='goog'").select(c).collect()]
+        request_data = {'tickers': [], 'ticker_ts_str': [], 'n_tweets' : [], 'price': []}
+        df_pd = df.toPandas()
 
+        df_pd['ticker_ts_str'] = df_pd['ticker_ts'].apply(lambda x: x.strftime("%Y-%m-%d %H:%M:%S"))
+        for s in df_pd.ticker_symbol.unique():
+            request_data['tickers'].append(s)
+            stats = df_pd[df_pd.ticker_symbol==s]
+            for c in ['ticker_ts_str', 'price', 'n_tweets']:
+                request_data[c].append(stats[c].values.tolist())
+
+        print("DATA BEING SEND")
         print(request_data)
 
-        url = 'http://dashboard:5001/updateData'
-        response = requests.post(url, data=request_data)
+        #url = 'http://dashboard:5001/updateData'
+        #response = requests.post(url, data=request_data)
 
 # Write result to endpoint to be picked up by dashboard
 result.writeStream.foreachBatch(send_df_to_dashboard).start()

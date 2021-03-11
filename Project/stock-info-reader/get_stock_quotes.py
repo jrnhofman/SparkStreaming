@@ -2,12 +2,13 @@ import json
 import pandas as pd
 import datetime
 import time
+import requests
 from tzlocal import get_localzone
 
 from kafka import KafkaProducer
 from yahoo_fin import stock_info as si
 
-
+MAX_RETRIES = 5
 topic_name = 'STOCK_QUOTES'
 
 starttime = time.time()
@@ -31,7 +32,16 @@ def get_ticker_list():
 def get_stock_quotes():
     tickers = get_ticker_list()
     while True:
-        tickers['Price'] = tickers.apply(lambda x: si.get_live_price(x['Symbol']), axis=1)
+        retries = 0
+        while retries < MAX_RETRIES:
+            try:
+                print("GETTING PRICES...")
+                tickers['Price'] = tickers.apply(lambda x: si.get_live_price(x['Symbol']), axis=1)
+                print("DONE...")
+                break
+            except requests.exceptions.ConnectionError:
+                print("Retrying as connection timed out")
+                retries += 1
         print(tickers)
 
         send_to_kafka(tickers)
